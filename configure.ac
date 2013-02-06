@@ -19,6 +19,10 @@ PKG_CHECK_MODULES([fuse], [fuse >= 2.6.0])
 # Large file support
 AC_SYS_LARGEFILE
 
+
+CPPFLAGS="-D_FILE_OFFSET_BITS=64"
+
+
 # Outputs resulting files.
 AC_CONFIG_FILES([Makefile
                  src/Makefile])
