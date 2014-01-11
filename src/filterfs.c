@@ -140,12 +140,20 @@ static int append_rules(char *patterns, int exclude)
  */
 static int exclude_path(const char *path)
 {
-    struct stat st;
+    struct stat st, symt;
     lstat(path, &st);
 
     /* directories must not be filtered (currently) */
     if (S_ISDIR(st.st_mode))
         return 0;
+
+    /* symlinks might point to directories */
+    if (S_ISLNK(st.st_mode)) {
+        stat(path, &symt);
+
+        if (S_ISDIR(symt.st_mode))
+            return 0;
+    }
 
     /* we only need the last part of the path */
     char *path_tail = strrchr(path, '/');
