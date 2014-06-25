@@ -69,7 +69,6 @@ static struct fuse_opt ffs_opts[] = {
     FUSE_OPT_KEY("--default-exclude",       KEY_DEFAULT_EXCLUDE),
     FUSE_OPT_KEY("--default-include",       KEY_DEFAULT_INCLUDE),
     FUSE_OPT_KEY("-d",                      KEY_KEEP_OPT),
-    FUSE_OPT_KEY("--debug",                 KEY_KEEP_OPT),
 
     FUSE_OPT_KEY("-h",            KEY_HELP),
     FUSE_OPT_KEY("--help",        KEY_HELP),
@@ -917,6 +916,7 @@ static int ffs_opt_proc(void *data, const char *arg, int key,
             exit(0);
 
         case KEY_KEEP_OPT:
+            debug = 1;
             return 1;
     }
 
