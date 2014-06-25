@@ -870,7 +870,7 @@ static int ffs_opt_proc(void *data, const char *arg, int key,
         case KEY_EXCLUDE:
             if (!(str = str_consume(arg, "--exclude="))
                 && !(str = str_consume(arg, "exclude="))
-                && !(str = str_consume(arg, "-X ")))
+                && !(str = str_consume(arg, "-X")))
                 return -1;
 
             /*
@@ -885,7 +885,7 @@ static int ffs_opt_proc(void *data, const char *arg, int key,
         case KEY_INCLUDE:
             if (!(str = str_consume(arg, "--include="))
                 && !(str = str_consume(arg, "include="))
-                && !(str = str_consume(arg, "-I ")))
+                && !(str = str_consume(arg, "-I")))
                 return -1;
 
             /* See comment for KEY_EXCLUDE above. */
