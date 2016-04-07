@@ -100,6 +100,7 @@ static int get_expath(char *dst, size_t dst_size, const char *src) {
 static int append_rule(char *pattern, int exclude)
 {
 	size_t pattern_length;
+	char *quotmark;
 	struct rule *rule = malloc(sizeof(struct rule));
 	
 	if (!rule)
@@ -107,6 +108,13 @@ static int append_rule(char *pattern, int exclude)
 	
 	rule->pattern = pattern;
 	pattern_length = strlen(pattern);
+	
+	// strip quotation marks at start and end
+	if (pattern[0] == '"' || pattern[pattern_length-1] == '"') {
+		rule->pattern = &pattern[1];
+		pattern[pattern_length-1] = 0;
+		pattern_length--;
+	}
 	
 	// strip trailing '/' from directories
 	if (pattern[pattern_length-1] == '/')
