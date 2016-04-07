@@ -37,7 +37,7 @@
 #include <sys/xattr.h>
 #endif
 
-#define ffs_debug(f, ...) syslog(LOG_DEBUG, f, ## __VA_ARGS__)
+#define ffs_debug(f, ...) fprintf(stdout, f, ## __VA_ARGS__)
 #define ffs_info(f, ...) syslog(LOG_INFO, f, ## __VA_ARGS__)
 #define ffs_error(f, ...) syslog(LOG_ERR, f, ## __VA_ARGS__)
 
