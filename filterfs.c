@@ -156,23 +156,40 @@ static int append_rules(char *patterns, int exclude)
 	return 0;
 }
 
+void checkString(const char *s, size_t *length, char *empty) {
+	*length = 0;
+	*empty = 1;
+	while (*s != '\0') {
+		if (*empty && !isspace(*s))
+			*empty = 0;
+		s++;
+		(*length)++;
+	}
+}
+
 static int parse_file(const char *filename, int exclude)
 {
 	FILE *f;
 	char line[PATH_MAX];
+	char empty;
 	size_t len;
 	
 	f = fopen(filename, "r");
 	if (f) {
 		while (fgets(line, sizeof(line), f)) {
-			len = strlen(line);
+// 			len = strlen(line);
+			checkString(line, &len, &empty);
+			
+			if (empty)
+				continue;
+			if (line[0] == '#')
+				continue;
 			
 			// remove trailing newlines
 			if (line[len-1] == '\n')
 				line[len-1] = 0;
 			
-			if (line[0] != '#')
-				append_rule(strdup(line), exclude);
+			append_rule(strdup(line), exclude);
 		}
 		
 		fclose(f);
