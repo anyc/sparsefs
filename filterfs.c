@@ -150,19 +150,34 @@ static int append_rules(char *patterns, int exclude)
 static int exclude_path(const char *path)
 {
 	struct stat st, symt;
-	lstat(path, &st);
+	size_t len;
 	
-	/* directories must not be filtered (currently) */
-	if (S_ISDIR(st.st_mode))
+	lstat(path, &st);
+	len = strlen(path);
+	
+	// always allow access to the srcdir itself (although it might appear empty)
+	if (strcmp(path, srcdir) == 0)
 		return 0;
 	
-	/* symlinks might point to directories */
-	if (S_ISLNK(st.st_mode)) {
-		stat(path, &symt);
-		
-		if (S_ISDIR(symt.st_mode))
-			return 0;
-	}
+	// always accept "." and ".." directories
+	// TODO use another function to improve speed as this one will call strlen again
+	if (strcmp(&path[len-2], "/.") == 0)
+		return 0;
+	
+	if (strcmp(&path[len-3], "/..") == 0)
+		return 0;
+	
+// 	/* directories must not be filtered (currently) */
+// 	if (S_ISDIR(st.st_mode))
+// 		return 0;
+// 	
+// 	/* symlinks might point to directories */
+// 	if (S_ISLNK(st.st_mode)) {
+// 		stat(path, &symt);
+// 		
+// 		if (S_ISDIR(symt.st_mode))
+// 			return 0;
+// 	}
 	
 	/* we only need the last part of the path */
 // 	char *path_tail = strrchr(path, '/');
@@ -854,10 +869,6 @@ static void usage(const char *progname)
 		"exclude unmatched items (default)\n"
 		"    --default-include                     "
 		"include unmatched items\n"
-		"    --dirs                                "
-		"include directories in filtering\n"
-		"    --no-dirs                             "
-		"exclude directories from filtering (default)\n"
 		"\n", progname);
 }
 
