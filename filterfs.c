@@ -49,6 +49,8 @@ size_t srcdir_length = 0;
 enum {
 	KEY_EXCLUDE,
 	KEY_INCLUDE,
+	KEY_EXCLUDEFILE,
+	KEY_INCLUDEFILE,
 	KEY_DEFAULT_EXCLUDE,
 	KEY_DEFAULT_INCLUDE,
 	KEY_HELP,
@@ -60,9 +62,11 @@ static struct fuse_opt ffs_opts[] = {
 	FUSE_OPT_KEY("-X %s",                   KEY_EXCLUDE),
 	FUSE_OPT_KEY("--exclude=%s",            KEY_EXCLUDE),
 	FUSE_OPT_KEY("exclude=%s",              KEY_EXCLUDE),
+	FUSE_OPT_KEY("--excludefile=%s",        KEY_EXCLUDEFILE),
 	FUSE_OPT_KEY("-I %s",                   KEY_INCLUDE),
 	FUSE_OPT_KEY("--include=%s",            KEY_INCLUDE),
 	FUSE_OPT_KEY("include=%s",              KEY_INCLUDE),
+	FUSE_OPT_KEY("--includefile=%s",        KEY_INCLUDEFILE),
 	FUSE_OPT_KEY("--default-exclude",       KEY_DEFAULT_EXCLUDE),
 	FUSE_OPT_KEY("--default-include",       KEY_DEFAULT_INCLUDE),
 	FUSE_OPT_KEY("-d",                      KEY_KEEP_OPT),
@@ -142,6 +146,31 @@ static int append_rules(char *patterns, int exclude)
 	}
 	
 	return 0;
+}
+
+static int parse_file(const char *filename, int exclude)
+{
+	FILE *f;
+	char line[PATH_MAX];
+	size_t len;
+	
+	f = fopen(filename, "r");
+	if (f) {
+		while (fgets(line, sizeof(line), f)) {
+			len = strlen(line);
+			
+			// remove trailing newlines
+			if (line[len-1] == '\n')
+				line[len-1] = 0;
+			
+			if (line[0] != '#')
+				append_rule(strdup(line), exclude);
+		}
+		
+		fclose(f);
+	} else {
+		ffs_error("cannot open file \"%s\"\n", filename);
+	}
 }
 
 /**
@@ -861,14 +890,12 @@ static void usage(const char *progname)
 		"    -V   --version         print version\n"
 		"\n"
 		"FilterFS options:\n"
-		"    -X, --exclude=pattern:[pattern...]    "
-		"patterns for files to be excluded\n"
-		"    -I, --include=pattern:[pattern...]    "
-		"patterns for files to be included\n"
-		"    --default-exclude                     "
-		"exclude unmatched items (default)\n"
-		"    --default-include                     "
-		"include unmatched items\n"
+		"    -X, --exclude=pattern:[pattern...]    patterns for files to be excluded\n"
+		"    -I, --include=pattern:[pattern...]    patterns for files to be included\n"
+		"    --excludefile=filename                file with one exclude pattern in each line\n"
+		"    --includefile=filename                file with one include pattern in each line\n"
+		"    --default-exclude                     exclude unmatched items (default)\n"
+		"    --default-include                     include unmatched items\n"
 		"\n", progname);
 }
 
@@ -910,6 +937,14 @@ static int ffs_opt_proc(void *data, const char *arg, int key,
 			
 			return 0;
 			
+		case KEY_EXCLUDEFILE:
+			if (!(str = str_consume(arg, "--excludefile=")))
+				return -1;
+			
+			parse_file(str, 1);
+			
+			return 0;
+			
 		case KEY_INCLUDE:
 			if (!(str = str_consume(arg, "--include="))
 				&& !(str = str_consume(arg, "include="))
@@ -919,6 +954,14 @@ static int ffs_opt_proc(void *data, const char *arg, int key,
 			/* See comment for KEY_EXCLUDE above. */
 			if (strlen(str) > 0)
 				append_rules(strdup(str), 0);
+			
+			return 0;
+			
+		case KEY_INCLUDEFILE:
+			if (!(str = str_consume(arg, "--includefile=")))
+				return -1;
+			
+			parse_file(str, 0);
 			
 			return 0;
 			
