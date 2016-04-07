@@ -7,8 +7,6 @@ config.log
 config.status
 config/
 configure
-src/.deps/
-src/Makefile
-src/Makefile.in
-src/filterfs
-src/filterfs.o
+filterfs
+filterfs.o
+.deps/
