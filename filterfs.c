@@ -32,14 +32,23 @@
 #include <string.h>
 #include <syslog.h>
 #include <sys/time.h>
+#include <sys/stat.h>
+#include <libgen.h>
 
 #ifdef HAVE_SETXATTR
 #include <sys/xattr.h>
 #endif
 
+#define ENABLE_OUTPUT
+#ifdef ENABLE_OUTPUT
 #define ffs_debug(f, ...) fprintf(stdout, f, ## __VA_ARGS__)
 #define ffs_info(f, ...) syslog(LOG_INFO, f, ## __VA_ARGS__)
 #define ffs_error(f, ...) syslog(LOG_ERR, f, ## __VA_ARGS__)
+#else
+#define ffs_debug(f, ...)
+#define ffs_info(f, ...)
+#define ffs_error(f, ...)
+#endif
 
 int default_exclude = 0;
 int debug = 0;
@@ -89,6 +98,42 @@ struct {
 	struct rule *tail;
 } chain;
 
+#define HT_LENGTH 100
+// struct hashtable {
+// 	struct {
+// 		unsigned int hash;
+// 		struct rule *rule;
+// 	} entries[HT_LENGTH];
+// } ht;
+
+struct rule *ht[HT_LENGTH] = {0};
+
+unsigned long calc_hash(const char *hstr)
+{
+	unsigned long hash = 5381;
+	const unsigned char *str = hstr;
+	int c;
+	
+	while (c = *str++)
+		hash = ((hash << 5) + hash) + c; /* hash * 33 + c */
+	
+	return hash;
+}
+
+struct rule *getRule(const char *s)
+{
+	unsigned long hash;
+	struct rule *e;
+	
+	hash = calc_hash(s);
+	printf("hash %lu\n", hash % HT_LENGTH);
+	e = ht[hash % HT_LENGTH];
+	printf("e %p\n", e);
+	for (; e && strcmp(e->pattern, s); e = e->next) {printf("%s %s\n", e->pattern, s);}
+	printf("getrule %s: %p\n", s, e);
+	return e;
+}
+
 static int get_expath(char *dst, size_t dst_size, const char *src) {
 	// concatenate strings and strip starting '/' from src
 	snprintf(dst, dst_size, "%s%s", srcdir, &src[1]);
@@ -101,8 +146,10 @@ static int append_rule(char *pattern, int exclude)
 {
 	size_t pattern_length;
 	char *quotmark;
-	struct rule *rule = malloc(sizeof(struct rule));
+	unsigned long hash;
+	struct rule *rule, *ht_head;
 	
+	rule = malloc(sizeof(struct rule));
 	if (!rule)
 		return -1;
 	
@@ -123,14 +170,41 @@ static int append_rule(char *pattern, int exclude)
 	rule->exclude = exclude;
 	rule->next = NULL;
 	
-	if (!chain.head) {
-		chain.head = rule;
-		chain.tail = rule;
+	if (strchr(pattern, '*') || strchr(pattern, '?')) {
+		if (!chain.head) {
+			chain.head = rule;
+			chain.tail = rule;
+		}
+		else {
+			chain.tail->next = rule;
+			chain.tail = rule;
+		}
+	} else {
+		hash = calc_hash(rule->pattern);
+		ht_head = ht[hash % HT_LENGTH];
+		
+		if (ht_head) {
+			for (; ht_head->next; ht_head = ht_head->next) {}
+			ht_head->next = rule;
+		} else {
+			ht[hash % HT_LENGTH] = rule;
+		}
 	}
-	else {
-		chain.tail->next = rule;
-		chain.tail = rule;
+	
+	struct stat s;
+	char *dir, *parent;
+	
+	dir = strdup(pattern);
+	parent = dir;
+	parent = dirname(parent);
+	
+	if (parent[0] != 0 && (parent[1] != 0 || (parent[0] != '.' && parent[0] != '/'))) {
+		if (stat(parent, &s) >= 0 && S_ISDIR(s.st_mode)) {
+			append_rule(strdup(dir), exclude);
+		}
 	}
+	
+	free(dir);
 	
 	return 0;
 }
@@ -239,17 +313,25 @@ static int exclude_path(const char *path)
 // 		*path_tail = *path;
 // 	else
 // 		path_tail++;
-	
-	struct rule *curr_rule = chain.head;
-	
-	while (curr_rule) {
-		if (fnmatch(curr_rule->pattern, path, FNM_PATHNAME) == 0) {
-			return curr_rule->exclude;
+
+	struct rule *curr_rule;
+	curr_rule = getRule(path);
+// 	printf("rule %p %d\n", curr_rule, curr_rule->exclude);
+	if (!curr_rule) {
+		curr_rule = chain.head;
+		while (curr_rule) {
+			if (fnmatch(curr_rule->pattern, path, FNM_PATHNAME) == 0) {
+// 				return curr_rule->exclude;
+				break;
+			}
+			curr_rule = curr_rule->next;
 		}
-		curr_rule = curr_rule->next;
 	}
 	
-	return default_exclude;
+	if (curr_rule)
+		return curr_rule->exclude;
+	else
+		return default_exclude;
 }
 
 /**
@@ -1047,11 +1129,11 @@ int main(int argc, char *argv[])
 		return 1;
 	}
 	
-	if (!chain.head) {
-		fprintf(stderr, "error: no filter expressions provided.\n");
-		usage(argv[0]);
-		return 1;
-	}
+// 	if (!chain.head) {
+// 		fprintf(stderr, "error: no filter expressions provided.\n");
+// 		usage(argv[0]);
+// 		return 1;
+// 	}
 	
 	/* Log to the screen if debug is enabled. */
 	openlog("filterfs", debug ? LOG_PERROR : 0, LOG_USER);
