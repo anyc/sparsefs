@@ -34,6 +34,7 @@
 #include <sys/time.h>
 #include <sys/stat.h>
 #include <libgen.h>
+#include <wildmatch.h>
 
 #ifdef HAVE_SETXATTR
 #include <sys/xattr.h>
@@ -320,8 +321,8 @@ static int exclude_path(const char *path)
 	if (!curr_rule) {
 		curr_rule = chain.head;
 		while (curr_rule) {
-			if (fnmatch(curr_rule->pattern, path, FNM_PATHNAME) == 0) {
-// 				return curr_rule->exclude;
+// 			if (fnmatch(curr_rule->pattern, path, FNM_PATHNAME) == 0) {
+			if (wildmatch(curr_rule->pattern, path, WM_PATHNAME, NULL) == WM_MATCH) {
 				break;
 			}
 			curr_rule = curr_rule->next;

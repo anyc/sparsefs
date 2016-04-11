@@ -1,2 +1,2 @@
 bin_PROGRAMS = filterfs
-filterfs_SOURCES = filterfs.c
+filterfs_SOURCES = filterfs.c wildmatch.c
