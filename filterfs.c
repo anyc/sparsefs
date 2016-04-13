@@ -100,14 +100,9 @@ struct {
 } chain;
 
 #define HT_LENGTH 100
-// struct hashtable {
-// 	struct {
-// 		unsigned int hash;
-// 		struct rule *rule;
-// 	} entries[HT_LENGTH];
-// } ht;
-
 struct rule *ht[HT_LENGTH] = {0};
+
+
 
 unsigned long calc_hash(const char *hstr)
 {
@@ -127,17 +122,11 @@ struct rule *getRule(const char *s)
 	struct rule *e;
 	
 	hash = calc_hash(s);
-	printf("hash %lu\n", hash % HT_LENGTH);
+	
 	e = ht[hash % HT_LENGTH];
-	printf("e %p\n", e);
-	for (; e && strcmp(e->pattern, s); e = e->next) {printf("%s %s\n", e->pattern, s);}
-	printf("getrule %s: %p\n", s, e);
+	for (; e && strcmp(e->pattern, s); e = e->next) {}
+	
 	return e;
-}
-
-static int get_expath(char *dst, size_t dst_size, const char *src) {
-	// concatenate strings and strip starting '/' from src
-	snprintf(dst, dst_size, "%s%s", srcdir, &src[1]);
 }
 
 /**
@@ -231,6 +220,9 @@ static int append_rules(char *patterns, int exclude)
 	return 0;
 }
 
+/**
+ * check if string only contains whitespaces and calculate length
+ */
 void checkString(const char *s, size_t *length, char *empty) {
 	*length = 0;
 	*empty = 1;
@@ -242,6 +234,9 @@ void checkString(const char *s, size_t *length, char *empty) {
 	}
 }
 
+/**
+ * read rules from file
+ */
 static int parse_file(const char *filename, int exclude)
 {
 	FILE *f;
@@ -252,7 +247,6 @@ static int parse_file(const char *filename, int exclude)
 	f = fopen(filename, "r");
 	if (f) {
 		while (fgets(line, sizeof(line), f)) {
-// 			len = strlen(line);
 			checkString(line, &len, &empty);
 			
 			if (empty)
@@ -276,7 +270,7 @@ static int parse_file(const char *filename, int exclude)
 /**
  * Checks whether the provided path should be excluded.
  */
-static int exclude_path(const char *path)
+static int exclude_chroot_path(const char *path)
 {
 	struct stat st, symt;
 	size_t len;
@@ -296,32 +290,11 @@ static int exclude_path(const char *path)
 	if (strcmp(&path[len-3], "/..") == 0)
 		return 0;
 	
-// 	/* directories must not be filtered (currently) */
-// 	if (S_ISDIR(st.st_mode))
-// 		return 0;
-// 	
-// 	/* symlinks might point to directories */
-// 	if (S_ISLNK(st.st_mode)) {
-// 		stat(path, &symt);
-// 		
-// 		if (S_ISDIR(symt.st_mode))
-// 			return 0;
-// 	}
-	
-	/* we only need the last part of the path */
-// 	char *path_tail = strrchr(path, '/');
-// 	if (path_tail == NULL)
-// 		*path_tail = *path;
-// 	else
-// 		path_tail++;
-
 	struct rule *curr_rule;
 	curr_rule = getRule(path);
-// 	printf("rule %p %d\n", curr_rule, curr_rule->exclude);
 	if (!curr_rule) {
 		curr_rule = chain.head;
 		while (curr_rule) {
-// 			if (fnmatch(curr_rule->pattern, path, FNM_PATHNAME) == 0) {
 			if (wildmatch(curr_rule->pattern, path, WM_PATHNAME, NULL) == WM_MATCH) {
 				break;
 			}
@@ -333,6 +306,17 @@ static int exclude_path(const char *path)
 		return curr_rule->exclude;
 	else
 		return default_exclude;
+}
+
+/**
+ * build real path and check if it should be excluded
+ */
+static int exclude_path(char *dst, size_t dst_size, const char *src)
+{
+	// concatenate strings and strip starting '/' from src
+	snprintf(dst, dst_size, "%s%s", srcdir, &src[1]);
+	
+	return exclude_chroot_path(dst);
 }
 
 /**
@@ -348,16 +332,17 @@ static const char *str_consume(const char *str1, char *str2)
 	return 0;
 }
 
+
+
 /*
  * FUSE callback operations
  */
+
 static int ffs_getattr(const char *path, struct stat *stbuf)
 {
 	char xpath[PATH_MAX];
 	
-	get_expath(xpath, PATH_MAX, path);
-	
-	int exclude = exclude_path(xpath);
+	int exclude = exclude_path(xpath, PATH_MAX, path);
 	
 	ffs_debug("getattr: path %s (expanded %s), exclude %s\n", path,
 			xpath, exclude ? "y" : "n");
@@ -377,9 +362,7 @@ static int ffs_access(const char *path, int mask)
 {
 	char xpath[PATH_MAX];
 	
-	get_expath(xpath, PATH_MAX, path);
-	
-	int exclude = exclude_path(xpath);
+	int exclude = exclude_path(xpath, PATH_MAX, path);
 	
 	ffs_debug("access: path %s (expanded %s), exclude %s\n", path,
 			xpath, exclude ? "y" : "n");
@@ -399,9 +382,7 @@ static int ffs_readlink(const char *path, char *buf, size_t size)
 {
 	char xpath[PATH_MAX];
 	
-	get_expath(xpath, PATH_MAX, path);
-	
-	int exclude = exclude_path(xpath);
+	int exclude = exclude_path(xpath, PATH_MAX, path);
 	
 	ffs_debug("readlink: path %s (expanded %s), exclude %s\n", path,
 			xpath, exclude ? "y" : "n");
@@ -427,9 +408,7 @@ static int ffs_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
 	char xpath[PATH_MAX];
 	char subpath[PATH_MAX];
 	
-	get_expath(xpath, PATH_MAX, path);
-	
-	int exclude = exclude_path(xpath);
+	int exclude = exclude_path(xpath, PATH_MAX, path);
 	
 	ffs_debug("readdir[1]: path %s (expanded %s), exclude: %s\n", path,
 			xpath, exclude ? "y" : "n");
@@ -444,7 +423,7 @@ static int ffs_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
 	while ((de = readdir(dp)) != NULL) {
 		snprintf(subpath, PATH_MAX, "%s%s%s", xpath, path[1] == 0 ? "":"/", de->d_name);
 		
-		exclude = exclude_path(subpath);
+		exclude = exclude_chroot_path(subpath);
 		
 		ffs_debug("readdir[2]: path %s (expanded %s), exclude: %s\n",
 				de->d_name, subpath, exclude ? "y" : "n");
@@ -468,9 +447,7 @@ static int ffs_mknod(const char *path, mode_t mode, dev_t rdev)
 {
 	char xpath[PATH_MAX];
 	
-	get_expath(xpath, PATH_MAX, path);
-	
-	int exclude = exclude_path(xpath);
+	int exclude = exclude_path(xpath, PATH_MAX, path);
 	
 	ffs_debug("mknod: path %s (expanded %s), exclude %s\n", path, xpath,
 			exclude ? "y" : "n");
@@ -500,9 +477,7 @@ static int ffs_mkdir(const char *path, mode_t mode)
 {
 	char xpath[PATH_MAX];
 	
-	get_expath(xpath, PATH_MAX, path);
-	
-	int exclude = exclude_path(xpath);
+	int exclude = exclude_path(xpath, PATH_MAX, path);
 	
 	ffs_debug("mkdir: path %s (expanded %s), exclude %s\n", path, xpath,
 			exclude ? "y" : "n");
@@ -522,9 +497,7 @@ static int ffs_unlink(const char *path)
 {
 	char xpath[PATH_MAX];
 	
-	get_expath(xpath, PATH_MAX, path);
-	
-	int exclude = exclude_path(xpath);
+	int exclude = exclude_path(xpath, PATH_MAX, path);
 	
 	ffs_debug("unlink: path %s (expanded %s), exclude %s\n", path,
 			xpath, exclude ? "y" : "n");
@@ -544,9 +517,7 @@ static int ffs_rmdir(const char *path)
 {
 	char xpath[PATH_MAX];
 	
-	get_expath(xpath, PATH_MAX, path);
-	
-	int exclude = exclude_path(xpath);
+	int exclude = exclude_path(xpath, PATH_MAX, path);
 	
 	ffs_debug("rmdir: path %s (expanded %s), exclude %s\n", path, xpath,
 			exclude ? "y" : "n");
@@ -565,18 +536,10 @@ static int ffs_rmdir(const char *path)
 static int ffs_symlink(const char *from, const char *to)
 {
 	char xfrom[PATH_MAX];
-	
-	strncpy(xfrom, srcdir, sizeof(xfrom));
-	if (from[0] != '/')
-		strncat(xfrom, "/", sizeof(xfrom) - 1);
-	strncat(xfrom, from, sizeof(xfrom) - strlen(xfrom));
-	
 	char xto[PATH_MAX];
-	strncpy(xto, srcdir, sizeof(xto));
-	strncat(xto, to, sizeof(xto) - strlen(xto));
 	
-	int exclude_from = exclude_path(xfrom);
-	int exclude_to = exclude_path(xto);
+	int exclude_from = exclude_path(xfrom, PATH_MAX, from);
+	int exclude_to = exclude_path(xto, PATH_MAX, to);
 	
 	ffs_debug("symlink: from %s (expanded %s), exclude %s; to %s"
 	" (expanded %s), exclude %s\n", from, xfrom,
@@ -596,17 +559,10 @@ static int ffs_symlink(const char *from, const char *to)
 static int ffs_rename(const char *from, const char *to)
 {
 	char xfrom[PATH_MAX];
-	strncpy(xfrom, srcdir, sizeof(xfrom));
-	if (from[0] != '/')
-		strncat(xfrom, "/", sizeof(xfrom) - 1);
-	strncat(xfrom, from, sizeof(xfrom) - strlen(xfrom));
-	
 	char xto[PATH_MAX];
-	strncpy(xto, srcdir, sizeof(xto));
-	strncat(xto, to, sizeof(xto) - strlen(xto));
 	
-	int exclude_from = exclude_path(xfrom);
-	int exclude_to = exclude_path(xto);
+	int exclude_from = exclude_path(xfrom, PATH_MAX, from);
+	int exclude_to = exclude_path(xto, PATH_MAX, to);
 	
 	ffs_debug("rename: from %s (expanded %s), exclude %s; to %s"
 	" (expanded %s), exclude %s\n", from, xfrom,
@@ -626,17 +582,10 @@ static int ffs_rename(const char *from, const char *to)
 static int ffs_link(const char *from, const char *to)
 {
 	char xfrom[PATH_MAX];
-	strncpy(xfrom, srcdir, sizeof(xfrom));
-	if (from[0] != '/')
-		strncat(xfrom, "/", sizeof(xfrom) - 1);
-	strncat(xfrom, from, sizeof(xfrom) - strlen(xfrom));
-	
 	char xto[PATH_MAX];
-	strncpy(xto, srcdir, sizeof(xto));
-	strncat(xto, to, sizeof(xto) - strlen(xto));
 	
-	int exclude_from = exclude_path(xfrom);
-	int exclude_to = exclude_path(xto);
+	int exclude_from = exclude_path(xfrom, PATH_MAX, from);
+	int exclude_to = exclude_path(xto, PATH_MAX, to);
 	
 	ffs_debug("link: from %s (expanded %s), exclude %s; to %s"
 	" (expanded %s), exclude %s\n", from, xfrom,
@@ -657,9 +606,7 @@ static int ffs_chmod(const char *path, mode_t mode)
 {
 	char xpath[PATH_MAX];
 	
-	get_expath(xpath, PATH_MAX, path);
-	
-	int exclude = exclude_path(xpath);
+	int exclude = exclude_path(xpath, PATH_MAX, path);
 	
 	ffs_debug("chmod: path %s (expanded %s), exclude %s\n", path, xpath,
 			exclude ? "y" : "n");
@@ -679,9 +626,7 @@ static int ffs_chown(const char *path, uid_t uid, gid_t gid)
 {
 	char xpath[PATH_MAX];
 	
-	get_expath(xpath, PATH_MAX, path);
-	
-	int exclude = exclude_path(xpath);
+	int exclude = exclude_path(xpath, PATH_MAX, path);
 	
 	ffs_debug("chown: path %s (expanded %s), exclude %s\n", path, xpath,
 			exclude ? "y" : "n");
@@ -701,9 +646,7 @@ static int ffs_truncate(const char *path, off_t size)
 {
 	char xpath[PATH_MAX];
 	
-	get_expath(xpath, PATH_MAX, path);
-	
-	int exclude = exclude_path(xpath);
+	int exclude = exclude_path(xpath, PATH_MAX, path);
 	
 	ffs_debug("truncate: path %s (expanded %s), exclude %s\n", path,
 			xpath, exclude ? "y" : "n");
@@ -723,9 +666,7 @@ static int ffs_utimens(const char *path, const struct timespec ts[2])
 {
 	char xpath[PATH_MAX];
 	
-	get_expath(xpath, PATH_MAX, path);
-	
-	int exclude = exclude_path(xpath);
+	int exclude = exclude_path(xpath, PATH_MAX, path);
 	
 	ffs_debug("utimens: path %s (expanded %s), exclude %s\n", path,
 			xpath, exclude ? "y" : "n");
@@ -752,9 +693,7 @@ static int ffs_open(const char *path, struct fuse_file_info *fi)
 {
 	char xpath[PATH_MAX];
 	
-	get_expath(xpath, PATH_MAX, path);
-	
-	int exclude = exclude_path(xpath);
+	int exclude = exclude_path(xpath, PATH_MAX, path);
 	
 	ffs_debug("open: path %s (expanded %s), exclude %s\n", path, xpath,
 			exclude ? "y" : "n");
@@ -776,9 +715,7 @@ static int ffs_read(const char *path, char *buf, size_t size, off_t offset,
 {
 	char xpath[PATH_MAX];
 	
-	get_expath(xpath, PATH_MAX, path);
-	
-	int exclude = exclude_path(xpath);
+	int exclude = exclude_path(xpath, PATH_MAX, path);
 	
 	ffs_debug("read: path %s (expanded %s), exclude %s\n", path, xpath,
 			exclude ? "y" : "n");
@@ -806,9 +743,7 @@ static int ffs_write(const char *path, const char *buf, size_t size,
 {
 	char xpath[PATH_MAX];
 	
-	get_expath(xpath, PATH_MAX, path);
-	
-	int exclude = exclude_path(xpath);
+	int exclude = exclude_path(xpath, PATH_MAX, path);
 	
 	ffs_debug("write: path %s (expanded %s), exclude %s\n", path, xpath,
 			exclude ? "y" : "n");
@@ -837,9 +772,7 @@ static int ffs_statfs(const char *path, struct statvfs *stbuf)
 {
 	char xpath[PATH_MAX];
 	
-	get_expath(xpath, PATH_MAX, path);
-	
-	int exclude = exclude_path(xpath);
+	int exclude = exclude_path(xpath, PATH_MAX, path);
 	
 	ffs_debug("statfs: path %s (expanded %s), exclude %s\n", path,
 			xpath, exclude ? "y" : "n");
@@ -879,9 +812,7 @@ static int ffs_setxattr(const char *path, const char *name, const char *value,
 {
 	char xpath[PATH_MAX];
 	
-	get_expath(xpath, PATH_MAX, path);
-	
-	int exclude = exclude_path(xpath);
+	int exclude = exclude_path(xpath, PATH_MAX, path);
 	
 	ffs_debug("setxattr: path %s (expanded %s), exclude %s\n", path,
 			xpath, exclude ? "y" : "n");
@@ -900,9 +831,7 @@ static int ffs_getxattr(const char *path, const char *name, char *value,
 {
 	char xpath[PATH_MAX];
 	
-	get_expath(xpath, PATH_MAX, path);
-	
-	int exclude = exclude_path(xpath);
+	int exclude = exclude_path(xpath, PATH_MAX, path);
 	
 	ffs_debug("getxattr: path %s (expanded %s), exclude %s\n", path,
 			xpath, exclude ? "y" : "n");
@@ -920,9 +849,7 @@ static int ffs_listxattr(const char *path, char *list, size_t size)
 {
 	char xpath[PATH_MAX];
 	
-	get_expath(xpath, PATH_MAX, path);
-	
-	int exclude = exclude_path(xpath);
+	int exclude = exclude_path(xpath, PATH_MAX, path);
 	
 	ffs_debug("listxattr: path %s (expanded %s), exclude %s\n", path,
 			xpath, exclude ? "y" : "n");
@@ -940,9 +867,7 @@ static int ffs_removexattr(const char *path, const char *name)
 {
 	char xpath[PATH_MAX];
 	
-	get_expath(xpath, PATH_MAX, path);
-	
-	int exclude = exclude_path(xpath);
+	int exclude = exclude_path(xpath, PATH_MAX, path);
 	
 	ffs_debug("removexattr: path %s (expanded %s), exclude %s\n", path,
 			xpath, exclude ? "y" : "n");
@@ -1129,12 +1054,6 @@ int main(int argc, char *argv[])
 		usage(argv[0]);
 		return 1;
 	}
-	
-// 	if (!chain.head) {
-// 		fprintf(stderr, "error: no filter expressions provided.\n");
-// 		usage(argv[0]);
-// 		return 1;
-// 	}
 	
 	/* Log to the screen if debug is enabled. */
 	openlog("filterfs", debug ? LOG_PERROR : 0, LOG_USER);
