@@ -1,7 +1,15 @@
 /*
- *  FilterFS: Filter Filesystem
+ *  SparseFS
+ *  --------
+ *
+ *  FUSE client that creates a sparse view of an existing filesystem
  * 
- *  Copyright (C) 2010
+ *  Copyright 2016 Mario Kicherer <dev@kicherer.org>
+ * 
+ *  sparsefs is based on FilterFS by Gregor Zurowski and Kristofer Henriksson,
+ *  see the copyright below.
+ *
+ *  FilterFS Copyright (C) 2010:
  *    Gregor Zurowski <gregor.zurowski@lunetta.net>
  *    Kristofer Henriksson <kthenriksson@gmail.com>
  * 
@@ -922,7 +930,7 @@ static void usage(const char *progname)
 		"    -h   --help            print help\n"
 		"    -V   --version         print version\n"
 		"\n"
-		"FilterFS options:\n"
+		"SparseFS options:\n"
 		"    -X, --exclude=pattern:[pattern...]    patterns for files to be excluded\n"
 		"    -I, --include=pattern:[pattern...]    patterns for files to be included\n"
 		"    --excludefile=filename                file with one exclude pattern in each line\n"
@@ -1013,7 +1021,7 @@ static int ffs_opt_proc(void *data, const char *arg, int key,
 			exit(1);
 			
 		case KEY_VERSION:
-			printf("FilterFS version %s\n", "1.0");
+			printf("SparseFS version %s\n", "0.2");
 			fuse_opt_add_arg(outargs, "--version");
 			fuse_main(outargs->argc, outargs->argv, &ffs_oper, NULL);
 			exit(0);
@@ -1056,7 +1064,7 @@ int main(int argc, char *argv[])
 	}
 	
 	/* Log to the screen if debug is enabled. */
-	openlog("filterfs", debug ? LOG_PERROR : 0, LOG_USER);
+	openlog("sparsefs", debug ? LOG_PERROR : 0, LOG_USER);
 	
 	/* Log startup information */
 	ffs_info("source dir: %s\n", srcdir);

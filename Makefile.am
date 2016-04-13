@@ -1,2 +1,2 @@
-bin_PROGRAMS = filterfs
-filterfs_SOURCES = filterfs.c wildmatch.c
+bin_PROGRAMS = sparsefs
+sparsefs_SOURCES = sparsefs.c wildmatch.c

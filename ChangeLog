@@ -1,3 +1,6 @@
-Changes for version 0.1 (30 Jul 2010):
+Version 0.2 (13 April 2016):
 
-  * initial revision
+  * new --includefile/--excludefile parameter to provide multiple patterns in
+    a file
+  * included wildmatch implementation to enable globbing of sub-trees using "**"
+  * introduced hash tables for faster lookup
