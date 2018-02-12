@@ -48,7 +48,7 @@ line. Such a file can be passed to SparseFS with
   --includefile=<file> OR --excludefile=<file>
 ```
 
-The default action for a FilterFS filesystem is to include all files that cannot
+The default action for a SparseFS filesystem is to include all files that cannot
 be matched by any rule. It is also possible to override this default behaviour
 and exclude all unmatched files with the following parameter:
 
@@ -59,7 +59,7 @@ and exclude all unmatched files with the following parameter:
 The order that rules are provided on the command line is the same as their order
 in the filter chain.
 
-It is also possible to mount FilterFS filesystems with the system's fstab file.
+It is also possible to mount SparseFS filesystems with the system's fstab file.
 This would require an entry in /etc/fstab such as the following::
 
 ```
@@ -67,7 +67,7 @@ This would require an entry in /etc/fstab such as the following::
   ,exclude=temporary*.log:*.cue,include=*.log:*.flac:*.mp3,default-include  0  0
 ```
 
-Note that mounting FilterFS filesystems with the fstab file requires the
+Note that mounting SparseFS filesystems with the fstab file requires the
 /sbin/mount.fuse utility from the fuse-utils package.
 
 Building

@@ -137,7 +137,7 @@ struct rule *getRule(const char *s)
 	return e;
 }
 
-/**
+/*
  * Appends a single rule to the filter chain.
  */
 static int append_rule(char *pattern, int exclude)
@@ -207,7 +207,7 @@ static int append_rule(char *pattern, int exclude)
 	return 0;
 }
 
-/**
+/*
  * Appends multiple rules to the filter chain.
  */
 static int append_rules(char *patterns, int exclude)
@@ -228,7 +228,7 @@ static int append_rules(char *patterns, int exclude)
 	return 0;
 }
 
-/**
+/*
  * check if string only contains whitespaces and calculate length
  */
 void checkString(const char *s, size_t *length, char *empty) {
@@ -242,7 +242,7 @@ void checkString(const char *s, size_t *length, char *empty) {
 	}
 }
 
-/**
+/*
  * read rules from file
  */
 static int parse_file(const char *filename, int exclude)
@@ -275,7 +275,7 @@ static int parse_file(const char *filename, int exclude)
 	}
 }
 
-/**
+/*
  * Checks whether the provided path should be excluded.
  */
 static int exclude_chroot_path(const char *path)
@@ -316,7 +316,7 @@ static int exclude_chroot_path(const char *path)
 		return default_exclude;
 }
 
-/**
+/*
  * build real path and check if it should be excluded
  */
 static int exclude_path(char *dst, size_t dst_size, const char *src)
@@ -327,7 +327,7 @@ static int exclude_path(char *dst, size_t dst_size, const char *src)
 	return exclude_chroot_path(dst);
 }
 
-/**
+/*
  * Checks if str1 begins with str2. If so, returns a pointer to the end of
  * the match. Otherwise, returns null.
  */
@@ -550,7 +550,7 @@ static int ffs_symlink(const char *from, const char *to)
 	int exclude_to = exclude_path(xto, PATH_MAX, to);
 	
 	ffs_debug("symlink: from %s (expanded %s), exclude %s; to %s"
-	" (expanded %s), exclude %s\n", from, xfrom,
+			" (expanded %s), exclude %s\n", from, xfrom,
 			exclude_from ? "y" : "n", to, xto, exclude_to ? "y": "n");
 	
 	if (exclude_from || exclude_to)
@@ -573,7 +573,7 @@ static int ffs_rename(const char *from, const char *to)
 	int exclude_to = exclude_path(xto, PATH_MAX, to);
 	
 	ffs_debug("rename: from %s (expanded %s), exclude %s; to %s"
-	" (expanded %s), exclude %s\n", from, xfrom,
+			" (expanded %s), exclude %s\n", from, xfrom,
 			exclude_from ? "y" : "n", to, xto, exclude_to ? "y": "n");
 	
 	if (exclude_from || exclude_to)
@@ -596,7 +596,7 @@ static int ffs_link(const char *from, const char *to)
 	int exclude_to = exclude_path(xto, PATH_MAX, to);
 	
 	ffs_debug("link: from %s (expanded %s), exclude %s; to %s"
-	" (expanded %s), exclude %s\n", from, xfrom,
+			" (expanded %s), exclude %s\n", from, xfrom,
 			exclude_from ? "y" : "n", to, xto, exclude_to ? "y": "n");
 	
 	if (exclude_from || exclude_to)
@@ -798,8 +798,10 @@ static int ffs_statfs(const char *path, struct statvfs *stbuf)
 
 static int ffs_release(const char *path, struct fuse_file_info *fi)
 {
-	/* Just a stub.  This method is optional and can safely be left
-	 *       unimplemented */
+	/* 
+	 * Just a stub.  This method is optional and can safely be left
+	 *       unimplemented
+	 */
 	
 	return 0;
 }
@@ -807,13 +809,16 @@ static int ffs_release(const char *path, struct fuse_file_info *fi)
 static int ffs_fsync(const char *path, int isdatasync,
 				 struct fuse_file_info *fi)
 {
-	/* Just a stub.  This method is optional and can safely be left
-	 *       unimplemented */
+	/* 
+	 * Just a stub.  This method is optional and can safely be left
+	 *       unimplemented
+	 */
 	
 	return 0;
 }
 
 #ifdef HAVE_SETXATTR
+
 /* xattr operations are optional */
 static int ffs_setxattr(const char *path, const char *name, const char *value,
 				    size_t size, int flags)
@@ -888,6 +893,7 @@ static int ffs_removexattr(const char *path, const char *name)
 		return -errno;
 	return 0;
 }
+
 #endif /* HAVE_SETXATTR */
 
 static struct fuse_operations ffs_oper = {
@@ -912,12 +918,12 @@ static struct fuse_operations ffs_oper = {
 	.statfs     = ffs_statfs,
 	.release    = ffs_release,
 	.fsync      = ffs_fsync,
-	#ifdef HAVE_SETXATTR
+#ifdef HAVE_SETXATTR
 	.setxattr   = ffs_setxattr,
 	.getxattr   = ffs_getxattr,
 	.listxattr  = ffs_listxattr,
 	.removexattr    = ffs_removexattr,
-	#endif
+#endif
 };
 
 static void usage(const char *progname)
