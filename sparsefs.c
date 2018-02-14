@@ -125,7 +125,7 @@ unsigned long calc_hash(const char *hstr)
 	return hash;
 }
 
-struct rule *getRule(const char *s)
+struct rule *getRuleByHash(const char *s)
 {
 	unsigned long hash;
 	struct rule *e;
@@ -169,7 +169,8 @@ static int append_rule(char *pattern, int exclude)
 	rule->exclude = exclude;
 	rule->next = NULL;
 	
-	if (strchr(pattern, '*') || strchr(pattern, '?')) {
+	// if pattern contains wildcards do not add it to the hashtable
+	if (strpbrk(pattern, "*?")) {
 		if (!chain.head) {
 			chain.head = rule;
 			chain.tail = rule;
@@ -282,6 +283,7 @@ static int parse_file(const char *filename, int exclude)
 static int exclude_chroot_path(const char *path)
 {
 	struct stat st, symt;
+	struct rule *curr_rule;
 	size_t len;
 	
 	lstat(path, &st);
@@ -299,8 +301,12 @@ static int exclude_chroot_path(const char *path)
 	if (strcmp(&path[len-3], "/..") == 0)
 		return 0;
 	
-	struct rule *curr_rule;
-	curr_rule = getRule(path);
+	// if pattern contains wildcards do not look in the hash table
+	if (strpbrk(path, "*?"))
+		curr_rule = 0;
+	else
+		curr_rule = getRuleByHash(path);
+	
 	if (!curr_rule) {
 		curr_rule = chain.head;
 		while (curr_rule) {
