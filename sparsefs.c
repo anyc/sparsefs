@@ -62,8 +62,11 @@
 
 int default_exclude = 0;
 int debug = 0;
-char *srcdir = NULL;
-size_t srcdir_length = 0;
+
+struct source {
+	char *path;
+} *sources = 0;
+unsigned int n_sources = 0;
 
 enum {
 	KEY_EXCLUDE,
@@ -72,6 +75,7 @@ enum {
 	KEY_INCLUDEFILE,
 	KEY_DEFAULT_EXCLUDE,
 	KEY_DEFAULT_INCLUDE,
+	KEY_SOURCE,
 	KEY_HELP,
 	KEY_VERSION,
 	KEY_KEEP_OPT
@@ -85,6 +89,9 @@ static struct fuse_opt ffs_opts[] = {
 	FUSE_OPT_KEY("-I %s",                   KEY_INCLUDE),
 	FUSE_OPT_KEY("--include=%s",            KEY_INCLUDE),
 	FUSE_OPT_KEY("include=%s",              KEY_INCLUDE),
+	FUSE_OPT_KEY("-s %s",                   KEY_SOURCE),
+	FUSE_OPT_KEY("source=%s",               KEY_SOURCE),
+	FUSE_OPT_KEY("--source=%s",             KEY_SOURCE),
 	FUSE_OPT_KEY("--includefile=%s",        KEY_INCLUDEFILE),
 	FUSE_OPT_KEY("--default-exclude",       KEY_DEFAULT_EXCLUDE),
 	FUSE_OPT_KEY("--default-include",       KEY_DEFAULT_INCLUDE),
@@ -108,6 +115,7 @@ struct {
 	struct rule *tail;
 } chain;
 
+// TODO find a way to determine a good number
 #define HT_LENGTH 100
 struct rule *ht[HT_LENGTH] = {0};
 
@@ -191,21 +199,6 @@ static int append_rule(char *pattern, int exclude)
 		}
 	}
 	
-	struct stat s;
-	char *dir, *parent;
-	
-	dir = strdup(pattern);
-	parent = dir;
-	parent = dirname(parent);
-	
-	if (parent[0] != 0 && (parent[1] != 0 || (parent[0] != '.' && parent[0] != '/'))) {
-		if (stat(parent, &s) >= 0 && S_ISDIR(s.st_mode)) {
-			append_rule(strdup(dir), exclude);
-		}
-	}
-	
-	free(dir);
-	
 	return 0;
 }
 
@@ -225,6 +218,29 @@ static int append_rules(char *patterns, int exclude)
 		
 		*str = '\0';
 		str++;
+	}
+	
+	return 0;
+}
+
+/*
+ * Append a source directory to the list
+ */
+static int append_source(char *source)
+{
+	size_t srcdir_length;
+	
+	n_sources += 1;
+	sources = (struct source*) realloc(sources, sizeof(struct source) * n_sources);
+	
+	srcdir_length = strlen(source);
+	
+	// make sure srcdir ends with a '/'
+	if (source[srcdir_length-1] == '/') {
+		sources[n_sources-1].path = strdup(source);
+	} else {
+		sources[n_sources-1].path = (char*) malloc(srcdir_length + 2);
+		sprintf(sources[n_sources-1].path, "%s/", source);
 	}
 	
 	return 0;
@@ -285,16 +301,18 @@ static int exclude_chroot_path(const char *path)
 	struct stat st, symt;
 	struct rule *curr_rule;
 	size_t len;
+	unsigned int i;
 	
 	lstat(path, &st);
 	len = strlen(path);
 	
 	// always allow access to the srcdir itself (although it might appear empty)
-	if (strcmp(path, srcdir) == 0)
-		return 0;
+	for (i=0; i < n_sources; i++) {
+		if (strcmp(path, sources[i].path) == 0)
+			return 0;
+	}
 	
 	// always accept "." and ".." directories
-	// TODO use another function to improve speed as this one will call strlen again
 	if (strcmp(&path[len-2], "/.") == 0)
 		return 0;
 	
@@ -302,6 +320,7 @@ static int exclude_chroot_path(const char *path)
 		return 0;
 	
 	// if pattern contains wildcards do not look in the hash table
+	// TODO consider escaped characters
 	if (strpbrk(path, "*?"))
 		curr_rule = 0;
 	else
@@ -326,12 +345,27 @@ static int exclude_chroot_path(const char *path)
 /*
  * build real path and check if it should be excluded
  */
-static int exclude_path(char *dst, size_t dst_size, const char *src)
+static int exclude_path(char *realpath, size_t realpath_size, const char *fuse_path)
 {
-	// concatenate strings and strip starting '/' from src
-	snprintf(dst, dst_size, "%s%s", srcdir, &src[1]);
+	unsigned int i;
+	int exclude;
 	
-	return exclude_chroot_path(dst);
+	exclude = 1;
+	for (i=0; i < n_sources; i++) {
+		// concatenate strings and strip starting '/' from $fuse_path
+		snprintf(realpath, realpath_size, "%s%s", sources[i].path, &fuse_path[1]);
+		
+		// only check this path if it exists in this source
+		if (access(realpath, F_OK) != -1) {
+			exclude = exclude_chroot_path(realpath);
+			
+			// if this path is included, use it
+			if (!exclude)
+				break;
+		}
+	}
+	
+	return exclude;
 }
 
 /*
@@ -414,34 +448,44 @@ static int ffs_readlink(const char *path, char *buf, size_t size)
 	return 0;
 }
 
-static int ffs_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
-				   off_t offset, struct fuse_file_info *fi)
-{
+static int ffs_readdir_helper(unsigned int source_idx, char *realpath, const char *path, void *buf, fuse_fill_dir_t filler) {
+	char subpath[PATH_MAX];
 	DIR *dp;
 	struct dirent *de;
-	
-	char realpath[PATH_MAX];
-	char subpath[PATH_MAX];
-	
-	int exclude = exclude_path(realpath, PATH_MAX, path);
-	
-	ffs_debug("readdir[1]: path %s (expanded %s), exclude: %s\n", path,
-			realpath, exclude ? "y" : "n");
-	
-	if (exclude)
-		return -ENOENT;
+	int exclude;
+	unsigned int i;
 	
 	dp = opendir(realpath);
 	if (dp == NULL)
 		return -errno;
 	
 	while ((de = readdir(dp)) != NULL) {
+		char skip = 0;
+		
+		// check if one of the previous sources already added an entity with this name
+		for (i=0; i < source_idx; i++) {
+			snprintf(subpath, PATH_MAX, "%s%s%s%s", sources[i].path, &path[1], path[1] == 0 ? "":"/", de->d_name);
+			fprintf(stderr, "rdir %s\n", subpath);
+			if (access(subpath, F_OK) != -1) {
+				exclude = exclude_chroot_path(subpath);
+				
+				// was entity in previous source excluded?
+				if (!exclude) {
+					skip = 1;
+					break;
+				}
+			}
+		}
+		
+		if (skip)
+			continue;
+		
 		snprintf(subpath, PATH_MAX, "%s%s%s", realpath, path[1] == 0 ? "":"/", de->d_name);
 		
 		exclude = exclude_chroot_path(subpath);
 		
 		ffs_debug("readdir[2]: path %s (expanded %s), exclude: %s\n",
-				de->d_name, subpath, exclude ? "y" : "n");
+				  de->d_name, subpath, exclude ? "y" : "n");
 		
 		if (exclude)
 			continue;
@@ -455,6 +499,44 @@ static int ffs_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
 	}
 	
 	closedir(dp);
+	
+	return 0;
+}
+
+static int ffs_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
+				   off_t offset, struct fuse_file_info *fi)
+{
+	char realpath[PATH_MAX];
+	int i, r, exclude;
+	ffs_debug("readdir[1]: path %s (expanded %s), exclude: %s\n", path,
+			realpath, exclude ? "y" : "n");
+	
+	// If we have to list the root of the fuse directory, we add the root entries
+	// from all sources. Else, we just show the entries from the 
+	if (!strcmp(path, "/")) {
+		for (i=0; i < n_sources; i++) {
+			r = ffs_readdir_helper(i, sources[i].path, path, buf, filler);
+			if (r)
+				return r;
+		}
+	} else {
+		for (i=0; i < n_sources; i++) {
+			snprintf(realpath, PATH_MAX, "%s%s", sources[i].path, &path[1]);
+			
+			if (access(realpath, F_OK) != -1) {
+				exclude = exclude_chroot_path(realpath);
+			} else {
+				continue;
+			}
+			
+			if (!exclude) {
+				r = ffs_readdir_helper(i, realpath, path, buf, filler);
+				if (r)
+					return r;
+			}
+		}
+	}
+	
 	return 0;
 }
 
@@ -936,7 +1018,7 @@ static struct fuse_operations ffs_oper = {
 static void usage(const char *progname)
 {
 	fprintf(stderr,
-		"\nusage: %s sourcedir mountpoint [options]\n"
+		"\nusage: %s mountpoint [options]\n"
 		"\n"
 		"general options:\n"
 		"    -o opt,[opt...]        mount options\n"
@@ -944,6 +1026,7 @@ static void usage(const char *progname)
 		"    -V   --version         print version\n"
 		"\n"
 		"SparseFS options:\n"
+		"    -s <filename>                         source directory\n"
 		"    -X, --exclude=pattern:[pattern...]    patterns for files to be excluded\n"
 		"    -I, --include=pattern:[pattern...]    patterns for files to be included\n"
 		"    --excludefile=filename                file with one exclude pattern in each line\n"
@@ -959,22 +1042,16 @@ static int ffs_opt_proc(void *data, const char *arg, int key,
 	const char *str;
 	
 	switch(key) {
-		case FUSE_OPT_KEY_NONOPT:
-			// first non-option parameter is source directory
-			if (!srcdir) {
-				srcdir_length = strlen(arg);
-				
-				// make sure srcdir ends with a '/'
-				if (arg[srcdir_length-1] == '/') {
-					srcdir = strdup(arg);
-				} else {
-					srcdir = (char*) malloc(srcdir_length + 2);
-					sprintf(srcdir, "%s/", arg);
-				}
-				
-				return 0;
-			}
-			break;
+		case KEY_SOURCE:
+			if (!(str = str_consume(arg, "--source="))
+				&& !(str = str_consume(arg, "source="))
+				&& !(str = str_consume(arg, "-s")))
+				return -1;
+			
+			if (strlen(str) > 0)
+				append_source(strdup(str));
+			
+			return 0;
 			
 		case KEY_EXCLUDE:
 			if (!(str = str_consume(arg, "--exclude="))
@@ -1049,6 +1126,7 @@ static int ffs_opt_proc(void *data, const char *arg, int key,
 
 int main(int argc, char *argv[])
 {
+	unsigned int i;
 	struct fuse_args args = FUSE_ARGS_INIT(argc, argv);
 	
 	if (fuse_opt_parse(&args, NULL, ffs_opts, ffs_opt_proc)) {
@@ -1057,21 +1135,8 @@ int main(int argc, char *argv[])
 		return 1;
 	}
 	
-	if (!srcdir) {
+	if (n_sources == 0) {
 		fprintf(stderr, "error: no source directory specified.\n");
-		usage(argv[0]);
-		return 1;
-	}
-	
-	if (!srcdir || srcdir[0] != '/') {
-		fprintf(stderr, "error: source directory must be an absolute path.\n");
-		usage(argv[0]);
-		return 1;
-	}
-	
-	struct stat st;
-	if (stat(srcdir, &st) != 0 || !S_ISDIR(st.st_mode)) {
-		fprintf(stderr, "error: source directory path does not exist or is not a directory.\n");
 		usage(argv[0]);
 		return 1;
 	}
@@ -1079,12 +1144,28 @@ int main(int argc, char *argv[])
 	/* Log to the screen if debug is enabled. */
 	openlog("sparsefs", debug ? LOG_PERROR : 0, LOG_USER);
 	
+	for (i=0; i < n_sources; i++) {
+		if (sources[i].path[0] != '/') {
+			fprintf(stderr, "error: source directory must be an absolute path.\n");
+			usage(argv[0]);
+			return 1;
+		}
+		
+		struct stat st;
+		if (stat(sources[i].path, &st) != 0 || !S_ISDIR(st.st_mode)) {
+			fprintf(stderr, "error: source directory path does not exist or is not a directory.\n");
+			usage(argv[0]);
+			return 1;
+		}
+		
+		ffs_info("source dir: %s\n", sources[i].path);
+	}
+	
 	/* Log startup information */
-	ffs_info("source dir: %s\n", srcdir);
 	ffs_info("default action: %s\n", default_exclude ? "exclude" : "include");
 	
 	struct rule *curr_rule = chain.head;
-	int i = 1;
+	i = 1;
 	while (curr_rule) {
 		ffs_info("filter %d: %s %s\n", i++,
 				curr_rule->exclude ? "exclude" : "include",
