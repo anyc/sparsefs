@@ -49,7 +49,7 @@
 #include <sys/xattr.h>
 #endif
 
-#define ENABLE_OUTPUT
+//#define ENABLE_OUTPUT
 #ifdef ENABLE_OUTPUT
 #define ffs_debug(f, ...) fprintf(stdout, f, ## __VA_ARGS__)
 #define ffs_info(f, ...) syslog(LOG_INFO, f, ## __VA_ARGS__)
@@ -1018,7 +1018,7 @@ static struct fuse_operations ffs_oper = {
 static void usage(const char *progname)
 {
 	fprintf(stderr,
-		"\nusage: %s mountpoint [options]\n"
+		"\nusage: %s [options] mountpoint\n"
 		"\n"
 		"general options:\n"
 		"    -o opt,[opt...]        mount options\n"
@@ -1026,13 +1026,13 @@ static void usage(const char *progname)
 		"    -V   --version         print version\n"
 		"\n"
 		"SparseFS options:\n"
-		"    -s <filename>                         source directory\n"
-		"    -X, --exclude=pattern:[pattern...]    patterns for files to be excluded\n"
-		"    -I, --include=pattern:[pattern...]    patterns for files to be included\n"
-		"    --excludefile=filename                file with one exclude pattern in each line\n"
-		"    --includefile=filename                file with one include pattern in each line\n"
-		"    --default-exclude                     exclude unmatched items (default)\n"
-		"    --default-include                     include unmatched items\n"
+		"    -s <source dir>                        source directory\n"
+		"    -X, --exclude=<pattern>[:<pattern>...] patterns for files to be excluded\n"
+		"    -I, --include=<pattern>[:<pattern>...] patterns for files to be included\n"
+		"    --excludefile=<filename>               file with one exclude pattern in each line\n"
+		"    --includefile=<filename>               file with one include pattern in each line\n"
+		"    --default-exclude                      exclude unmatched items (default)\n"
+		"    --default-include                      include unmatched items\n"
 		"\n", progname);
 }
 

@@ -2,13 +2,13 @@
 SparseFS
 --------
 
-FUSE client that creates a sparse view of an existing filesystem
+FUSE client that creates a sparse view of one or more directories
 
 Usage
 -----
 
 ```
-usage: ./sparsefs sourcedir mountpoint [options]
+usage: ./sparsefs [options] mountpoint
 
 general options:
     -o opt,[opt...]        mount options
@@ -16,12 +16,13 @@ general options:
     -V   --version         print version
 
 FilterFS options:
-    -X, --exclude=pattern:[pattern...]    patterns for files to be excluded
-    -I, --include=pattern:[pattern...]    patterns for files to be included
-    --excludefile=filename                file with one exclude pattern in each line
-    --includefile=filename                file with one include pattern in each line
-    --default-exclude                     exclude unmatched items (default)
-    --default-include                     include unmatched items
+    -s <source dir>                        source directory
+    -X, --exclude=<pattern>[:<pattern>...] patterns for files to be excluded
+    -I, --include=<pattern>[:<pattern>...] patterns for files to be included
+    --excludefile=<filename>               file with one exclude pattern in each line
+    --includefile=<filename>               file with one include pattern in each line
+    --default-exclude                      exclude unmatched items (default)
+    --default-include                      include unmatched items
 ```
 
 Include and exclude filters are specified on the command line or alternatively
@@ -38,14 +39,14 @@ in the system fstab. In place of any of the <pattern> placeholders above
 multiple patterns separated by colons can be used, yielding e.g.:
 
 ```
-  -I <pattern>[:<pattern>[...]] or --exclude=<pattern>[:<pattern>[...]]
+  -I <pattern>[:<pattern>[...]] OR --exclude=<pattern>[:<pattern>[...]]
 ```
 
 Additionally, these patterns can be specified in a file with one pattern per
 line. Such a file can be passed to SparseFS with
 
 ```
-  --includefile=<file> OR --excludefile=<file>
+  --includefile=<filename> OR --excludefile=<filename>
 ```
 
 The default action for a SparseFS filesystem is to include all files that cannot
@@ -59,13 +60,11 @@ and exclude all unmatched files with the following parameter:
 The order that rules are provided on the command line is the same as their order
 in the filter chain.
 
-It is also possible to mount SparseFS filesystems with the system's fstab file.
-This would require an entry in /etc/fstab such as the following::
-
-```
-  #filterfs#/mnt/audio /mnt/filtered-audio fuse allow_other
-  ,exclude=temporary*.log:*.cue,include=*.log:*.flac:*.mp3,default-include  0  0
-```
+SparseFS requires at least one source directory. If multiple source directories
+were specified, the files and directories of the sources are merged into one
+hierarchy. If a file exists in multiple sources, the file from the first source
+is shown. If you need more control over how the hierarchies are merged, see
+[MergerFS](https://github.com/trapexit/mergerfs) for a more mature solution.
 
 Note that mounting SparseFS filesystems with the fstab file requires the
 /sbin/mount.fuse utility from the fuse-utils package.
