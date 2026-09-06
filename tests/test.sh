@@ -5,7 +5,11 @@ set -euo pipefail
 TEST_DIR=$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 
 qgrep() {
-	grep -q -- "$1" "$2"
+	case $# in
+		1) grep -- "$1" >/dev/null ;;
+		2) grep -- "$1" "$2" >/dev/null ;;
+		*) return 2 ;;
+	esac
 }
 
 cleanup() {
