@@ -31,7 +31,8 @@ fail() {
 FDIR=$(mktemp -d "${TMPDIR:-/tmp}/sparsefs-test.XXXXXX")
 trap cleanup EXIT
 
-"$TEST_DIR/../sparsefs" -s "$TEST_DIR/test1/src1/" -s "$TEST_DIR/test1/src2/" \
+"$TEST_DIR/../sparsefs" --source="$TEST_DIR/test1/src1/" \
+	--source="$TEST_DIR/test1/src2/" \
 	"$FDIR"
 
 qgrep source1 "$FDIR/both12" || fail "${BASH_SOURCE[0]}" "$LINENO"
@@ -58,7 +59,8 @@ qgrep source2 "$FDIR/path2/source2" || fail "${BASH_SOURCE[0]}" "$LINENO"
 cleanup
 
 FDIR=$(mktemp -d "${TMPDIR:-/tmp}/sparsefs-test.XXXXXX")
-"$TEST_DIR/../sparsefs" -s "$TEST_DIR/test1/src1/" -s "$TEST_DIR/test1/src2/" \
+"$TEST_DIR/../sparsefs" --source="$TEST_DIR/test1/src1/" \
+	--source="$TEST_DIR/test1/src2/" \
 	-X "$TEST_DIR/test1/src1/both12" \
 	-X "$TEST_DIR/test1/src1/path12/both12" \
 	"$FDIR"

@@ -391,8 +391,10 @@ static int exclude_path(char *realpath, size_t realpath_size, const char *fuse_p
 	int result;
 	char parent[PATH_MAX];
 	char *slash;
-	
-	exclude = 1;
+	struct stat st;
+
+	/* Prefer an existing entry, searching every source before falling back
+	 * to a source whose parent can receive a new filesystem object. */
 	for (i=0; i < n_sources; i++) {
 		result = build_path(realpath, realpath_size, sources[i].path, fuse_path);
 		if (result < 0) {
@@ -400,32 +402,37 @@ static int exclude_path(char *realpath, size_t realpath_size, const char *fuse_p
 			return 1;
 		}
 		
-		// only check this path if it exists in this source
-		if (access(realpath, F_OK) != -1) {
-			exclude = exclude_chroot_path(realpath);
-		} else {
-			/* New filesystem objects are selected by their parent source. */
-			if (strlen(realpath) >= sizeof(parent))
+		if (lstat(realpath, &st) == -1) {
+			if (errno == ENOENT)
 				continue;
-			strcpy(parent, realpath);
-			slash = strrchr(parent, '/');
-			if (!slash)
-				continue;
-			if (slash == parent)
-				slash[1] = 0;
-			else
-				slash[0] = 0;
-			if (access(parent, F_OK) == -1 || exclude_chroot_path(parent))
-				continue;
-			exclude = exclude_chroot_path(realpath);
+			return -errno;
 		}
-
-		/* If this path is included, use this source. */
-		if (!exclude)
-			break;
+		if (!exclude_chroot_path(realpath))
+			return 0;
 	}
-	
-	return exclude;
+
+	/* New filesystem objects are selected by their parent source. */
+	for (i=0; i < n_sources; i++) {
+		result = build_path(realpath, realpath_size, sources[i].path, fuse_path);
+		if (result < 0)
+			continue;
+		if (strlen(realpath) >= sizeof(parent))
+			continue;
+		strcpy(parent, realpath);
+		slash = strrchr(parent, '/');
+		if (!slash)
+			continue;
+		if (slash == parent)
+			slash[1] = 0;
+		else
+			slash[0] = 0;
+		if (lstat(parent, &st) == -1 || exclude_chroot_path(parent))
+			continue;
+		if (!exclude_chroot_path(realpath))
+			return 0;
+	}
+
+	return 1;
 }
 
 /*
@@ -450,23 +457,31 @@ static const char *str_consume(const char *str1, const char *str2)
 static int ffs_getattr(const char *path, struct stat *stbuf)
 {
 	char realpath[PATH_MAX];
-	
-	int exclude = exclude_path(realpath, PATH_MAX, path);
-	
-	ffs_debug("getattr: path %s (expanded %s), exclude %s\n", path,
-			realpath, exclude ? "y" : "n");
-	
-	if (exclude < 0)
-		return exclude;
-	if (exclude)
-		return -ENOENT;
-	
-	int res;
-	res = lstat(realpath, stbuf);
-	if (res == -1)
-		return -errno;
-	
-	return 0;
+	unsigned int i;
+
+	for (i = 0; i < n_sources; i++) {
+		int result = build_path(realpath, PATH_MAX, sources[i].path, path);
+		struct stat candidate;
+
+		if (result < 0)
+			return result;
+		if (lstat(realpath, &candidate) == -1) {
+			if (errno == ENOENT)
+				continue;
+			return -errno;
+		}
+
+		if (exclude_chroot_path(realpath))
+			continue;
+
+		ffs_debug("getattr: path %s (expanded %s), exclude n\n", path,
+				realpath);
+		*stbuf = candidate;
+		return 0;
+	}
+
+	ffs_debug("getattr: path %s, not found\n", path);
+	return -ENOENT;
 }
 
 static int ffs_access(const char *path, int mask)
