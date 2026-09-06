@@ -304,13 +304,23 @@ static int parse_file(const char *filename, int exclude)
 			if (line[len-1] == '\n')
 				line[len-1] = 0;
 			
-			append_rule(strdup(line), exclude);
+			if (append_rule(strdup(line), exclude) == -1) {
+				fclose(f);
+				return -ENOMEM;
+			}
 		}
 		
+		if (ferror(f)) {
+			fclose(f);
+			return -EIO;
+		}
 		fclose(f);
 	} else {
 		ffs_error("cannot open file \"%s\"\n", filename);
+		return -errno;
 	}
+
+	return 0;
 }
 
 /*
@@ -333,27 +343,18 @@ static int exclude_chroot_path(const char *path)
 	}
 	
 	// always accept "." and ".." directories
-	if (strcmp(&path[len-2], "/.") == 0)
+	if (len >= 2 && strcmp(&path[len-2], "/.") == 0)
 		return 0;
 	
-	if (strcmp(&path[len-3], "/..") == 0)
+	if (len >= 3 && strcmp(&path[len-3], "/..") == 0)
 		return 0;
 	
-	// if pattern contains wildcards do not look in the hash table
-	// TODO consider escaped characters
-	if (strpbrk(path, "*?"))
-		curr_rule = 0;
-	else
-		curr_rule = getRuleByHash(path);
-	
-	if (!curr_rule) {
-		curr_rule = chain.head;
-		while (curr_rule) {
-			if (wildmatch(curr_rule->pattern, path, WM_PATHNAME, NULL) == WM_MATCH) {
-				break;
-			}
-			curr_rule = curr_rule->next;
+	curr_rule = chain.head;
+	while (curr_rule) {
+		if (wildmatch(curr_rule->pattern, path, WM_PATHNAME, NULL) == WM_MATCH) {
+			break;
 		}
+		curr_rule = curr_rule->next;
 	}
 	
 	if (curr_rule)
@@ -362,27 +363,68 @@ static int exclude_chroot_path(const char *path)
 		return default_exclude;
 }
 
+/* Build a source path without silently truncating it. */
+static int build_path(char *realpath, size_t realpath_size,
+			const char *source, const char *fuse_path)
+{
+	int length;
+
+	if (!fuse_path || fuse_path[0] != '/')
+		return -EINVAL;
+
+	length = snprintf(realpath, realpath_size, "%s%s", source,
+			&fuse_path[1]);
+	if (length < 0)
+		return -EINVAL;
+	if ((size_t)length >= realpath_size)
+		return -ENAMETOOLONG;
+
+	return 0;
+}
+
 /*
- * build real path and check if it should be excluded
+ * Build a real path and check if it should be excluded. Invalid or too-long
+ * paths are treated as excluded rather than being passed to the filesystem.
  */
 static int exclude_path(char *realpath, size_t realpath_size, const char *fuse_path)
 {
 	unsigned int i;
 	int exclude;
+	int result;
+	char parent[PATH_MAX];
+	char *slash;
 	
 	exclude = 1;
 	for (i=0; i < n_sources; i++) {
-		// concatenate strings and strip starting '/' from $fuse_path
-		snprintf(realpath, realpath_size, "%s%s", sources[i].path, &fuse_path[1]);
+		result = build_path(realpath, realpath_size, sources[i].path, fuse_path);
+		if (result < 0) {
+			realpath[0] = 0;
+			return 1;
+		}
 		
 		// only check this path if it exists in this source
 		if (access(realpath, F_OK) != -1) {
 			exclude = exclude_chroot_path(realpath);
-			
-			// if this path is included, use it
-			if (!exclude)
-				break;
+		} else {
+			/* New filesystem objects are selected by their parent source. */
+			if (strlen(realpath) >= sizeof(parent))
+				continue;
+			strcpy(parent, realpath);
+			slash = strrchr(parent, '/');
+			if (!slash)
+				continue;
+			if (slash == parent)
+				slash[1] = 0;
+			else
+				slash[0] = 0;
+			if (access(parent, F_OK) == -1 || exclude_chroot_path(parent))
+				continue;
+			exclude = exclude_chroot_path(realpath);
 		}
+
+		/* If this path is included, use this source. */
+		if (!exclude)
+			break;
 	}
 	
 	return exclude;
@@ -436,6 +478,8 @@ static int ffs_access(const char *path, int mask)
 	ffs_debug("access: path %s (expanded %s), exclude %s\n", path,
 			realpath, exclude ? "y" : "n");
 	
+	if (exclude < 0)
+		return exclude;
 	if (exclude)
 		return -ENOENT;
 	
