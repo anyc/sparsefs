@@ -1232,7 +1232,7 @@ static int ffs_opt_proc(void *data, const char *arg, int key,
 			exit(1);
 			
 		case KEY_VERSION:
-			printf("SparseFS version %s\n", "0.2");
+			printf("SparseFS version %s\n", "0.3");
 			fuse_opt_add_arg(outargs, "--version");
 			fuse_main(outargs->argc, outargs->argv, &ffs_oper, NULL);
 			exit(0);

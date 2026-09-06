@@ -1,3 +1,15 @@
+Version 0.3 (6 September 2026):
+
+  * support multiple source directories and merged directory views
+  * add include and exclude pattern files
+  * add build and test automation
+  * preserve filter rule ordering for literal and wildcard patterns
+  * harden rule, source, and configuration-file parsing
+  * reject truncated paths and handle creation through source parents
+  * use persistent file handles for I/O and implement fsync
+  * correct symlink target handling and directory metadata
+  * improve integration-test cleanup and source distribution contents
+
 Version 0.2 (13 April 2016):
 
   * new --includefile/--excludefile parameter to provide multiple patterns in

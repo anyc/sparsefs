@@ -79,9 +79,8 @@ systems.
 To build SparseFS, execute:
 
 ```
-aclocal
-autoconf
-automake --add-missing
+autoreconf --install
+./configure
 make
 ```
 

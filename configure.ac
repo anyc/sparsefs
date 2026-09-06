@@ -1,5 +1,5 @@
 # Sets up package and initializes build system.
-AC_INIT([SparseFS], [0.2])
+AC_INIT([SparseFS], [0.3])
 AC_CONFIG_SRCDIR([sparsefs.c])
 AM_INIT_AUTOMAKE([foreign -Wall -Werror])
 m4_ifdef([AM_SILENT_RULES], [AM_SILENT_RULES([yes])])
