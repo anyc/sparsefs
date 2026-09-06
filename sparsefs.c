@@ -900,22 +900,29 @@ static int ffs_read(const char *path, char *buf, size_t size, off_t offset,
 		return -ENOENT;
 	
 	int fd;
+	int close_fd = 0;
 	int res;
 	
-	fd = open(realpath, O_RDONLY);
-	if (fd == -1)
-		return -errno;
+	if (fi->fh) {
+		fd = (int)(fi->fh - 1);
+	} else {
+		fd = open(realpath, O_RDONLY);
+		if (fd == -1)
+			return -errno;
+		close_fd = 1;
+	}
 	
 	res = pread(fd, buf, size, offset);
 	if (res == -1)
 		res = -errno;
 	
-	close(fd);
+	if (close_fd)
+		close(fd);
 	return res;
 }
 
 static int ffs_write(const char *path, const char *buf, size_t size,
-				 off_t offset, struct fuse_file_info *fi)
+					 off_t offset, struct fuse_file_info *fi)
 {
 	char realpath[PATH_MAX];
 	
@@ -924,23 +931,28 @@ static int ffs_write(const char *path, const char *buf, size_t size,
 	ffs_debug("write: path %s (expanded %s), exclude %s\n", path, realpath,
 			exclude ? "y" : "n");
 	
-	ffs_debug("write: path %s (expanded %s)\n", path, realpath);
-	
 	if (exclude)
 		return -ENOENT;
 	
 	int fd;
+	int close_fd = 0;
 	int res;
 	
-	fd = open(realpath, O_WRONLY);
-	if (fd == -1)
-		return -errno;
+	if (fi->fh) {
+		fd = (int)(fi->fh - 1);
+	} else {
+		fd = open(realpath, O_WRONLY);
+		if (fd == -1)
+			return -errno;
+		close_fd = 1;
+	}
 	
 	res = pwrite(fd, buf, size, offset);
 	if (res == -1)
 		res = -errno;
 	
-	close(fd);
+	if (close_fd)
+		close(fd);
 	return res;
 }
 
@@ -971,6 +983,10 @@ static int ffs_release(const char *path, struct fuse_file_info *fi)
 	 *       unimplemented
 	 */
 	
+	(void)path;
+	if (fi->fh)
+		close((int)(fi->fh - 1));
+	fi->fh = 0;
 	return 0;
 }
 
@@ -982,7 +998,13 @@ static int ffs_fsync(const char *path, int isdatasync,
 	 *       unimplemented
 	 */
 	
-	return 0;
+	int res;
+	(void)path;
+	if (!fi->fh)
+		return -EBADF;
+	res = isdatasync ? fdatasync((int)(fi->fh - 1)) :
+			fsync((int)(fi->fh - 1));
+	return res == -1 ? -errno : 0;
 }
 
 #ifdef HAVE_SETXATTR
