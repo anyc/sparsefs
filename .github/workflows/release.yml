@@ -1,0 +1,47 @@
+name: Release source tarball
+
+on:
+  push:
+    tags:
+      - '**'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Check out tagged source
+        uses: actions/checkout@v4
+
+      - name: Install packaging dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y \
+            autoconf \
+            automake \
+            gcc \
+            libfuse-dev \
+            pkg-config
+
+      - name: Prepare and verify source archive
+        run: |
+          autoreconf --install --force
+          ./configure
+          make distcheck
+
+      - name: Create GitHub release and upload archive
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          archive=$(find . -maxdepth 1 -type f -name '*.tar.gz' -print -quit)
+          test -n "$archive"
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" "$archive" --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" "$archive" \
+              --title "$GITHUB_REF_NAME" \
+              --generate-notes
+          fi

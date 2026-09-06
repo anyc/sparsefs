@@ -1,0 +1,39 @@
+name: Build and test
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Install build and FUSE dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y \
+            autoconf \
+            automake \
+            gcc \
+            libfuse-dev \
+            pkg-config \
+            tree
+
+      - name: Generate build system
+        run: autoreconf --install --force
+
+      - name: Configure and build
+        run: |
+          ./configure
+          make
+
+      - name: Run tests
+        working-directory: tests
+        run: ./test.sh
