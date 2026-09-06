@@ -37,6 +37,7 @@
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdint.h>
 #include <string.h>
 #include <syslog.h>
 #include <sys/time.h>
@@ -115,35 +116,9 @@ struct {
 	struct rule *tail;
 } chain;
 
-// TODO find a way to determine a good number
-#define HT_LENGTH 100
-struct rule *ht[HT_LENGTH] = {0};
-
-
-
-unsigned long calc_hash(const char *hstr)
+static int size_multiply_overflow(size_t left, size_t right)
 {
-	unsigned long hash = 5381;
-	const unsigned char *str = hstr;
-	int c;
-	
-	while (c = *str++)
-		hash = ((hash << 5) + hash) + c; /* hash * 33 + c */
-	
-	return hash;
-}
-
-struct rule *getRuleByHash(const char *s)
-{
-	unsigned long hash;
-	struct rule *e;
-	
-	hash = calc_hash(s);
-	
-	e = ht[hash % HT_LENGTH];
-	for (; e && strcmp(e->pattern, s); e = e->next) {}
-	
-	return e;
+	return right != 0 && left > SIZE_MAX / right;
 }
 
 /*
@@ -152,51 +127,48 @@ struct rule *getRuleByHash(const char *s)
 static int append_rule(char *pattern, int exclude)
 {
 	size_t pattern_length;
-	char *quotmark;
-	unsigned long hash;
-	struct rule *rule, *ht_head;
-	
-	rule = malloc(sizeof(struct rule));
-	if (!rule)
+	struct rule *rule;
+
+	if (!pattern)
 		return -1;
 	
-	rule->pattern = pattern;
 	pattern_length = strlen(pattern);
 	
-	// strip quotation marks at start and end
-	if (pattern[0] == '"' || pattern[pattern_length-1] == '"') {
-		rule->pattern = &pattern[1];
-		pattern[pattern_length-1] = 0;
-		pattern_length--;
+	/* Strip a pair of quotation marks, but never index an empty string. */
+	if (pattern_length >= 2 && pattern[0] == '"' &&
+			pattern[pattern_length - 1] == '"') {
+		memmove(pattern, pattern + 1, pattern_length - 2);
+		pattern_length -= 2;
+		pattern[pattern_length] = 0;
 	}
 	
 	// strip trailing '/' from directories
-	if (pattern[pattern_length-1] == '/')
-		pattern[pattern_length-1] = 0;
+	if (pattern_length > 0 && pattern[pattern_length - 1] == '/')
+		pattern[--pattern_length] = 0;
+
+	/* Empty rules are harmless and can be produced by a trailing ':'. */
+	if (pattern_length == 0) {
+		free(pattern);
+		return 0;
+	}
+
+	rule = malloc(sizeof(struct rule));
+	if (!rule) {
+		free(pattern);
+		return -1;
+	}
+
+	rule->pattern = pattern;
 	
 	rule->exclude = exclude;
 	rule->next = NULL;
 	
-	// if pattern contains wildcards do not add it to the hashtable
-	if (strpbrk(pattern, "*?")) {
-		if (!chain.head) {
-			chain.head = rule;
-			chain.tail = rule;
-		}
-		else {
-			chain.tail->next = rule;
-			chain.tail = rule;
-		}
+	if (!chain.head) {
+		chain.head = rule;
+		chain.tail = rule;
 	} else {
-		hash = calc_hash(rule->pattern);
-		ht_head = ht[hash % HT_LENGTH];
-		
-		if (ht_head) {
-			for (; ht_head->next; ht_head = ht_head->next) {}
-			ht_head->next = rule;
-		} else {
-			ht[hash % HT_LENGTH] = rule;
-		}
+		chain.tail->next = rule;
+		chain.tail = rule;
 	}
 	
 	return 0;
@@ -208,18 +180,32 @@ static int append_rule(char *pattern, int exclude)
 static int append_rules(char *patterns, int exclude)
 {
 	char *str = patterns;
+	char *next;
+	char *rule_pattern;
 	
 	while (1) {
-		if (append_rule(str, exclude) == -1)
-			return -1;
-		
-		if (!(str = strchr(str, ':')))
+		next = strchr(str, ':');
+		if (next)
+			*next = 0;
+
+		if (*str) {
+			rule_pattern = strdup(str);
+			if (!rule_pattern) {
+				free(patterns);
+				return -1;
+			}
+			if (append_rule(rule_pattern, exclude) == -1) {
+				free(patterns);
+				return -1;
+			}
+		}
+
+		if (!next)
 			break;
-		
-		*str = '\0';
-		str++;
+		str = next + 1;
 	}
-	
+
+	free(patterns);
 	return 0;
 }
 
@@ -229,19 +215,49 @@ static int append_rules(char *patterns, int exclude)
 static int append_source(char *source)
 {
 	size_t srcdir_length;
+	struct source *new_sources;
+	char *path;
+
+	if (!source)
+		return -1;
+	if (source[0] == 0) {
+		free(source);
+		return 0;
+	}
 	
-	n_sources += 1;
-	sources = (struct source*) realloc(sources, sizeof(struct source) * n_sources);
+	if (n_sources == UINT_MAX ||
+		size_multiply_overflow((size_t)n_sources + 1, sizeof(*sources))) {
+		free(source);
+		return -1;
+	}
+
+	new_sources = realloc(sources, sizeof(*sources) * (n_sources + 1));
+	if (!new_sources) {
+		free(source);
+		return -1;
+	}
+	sources = new_sources;
 	
 	srcdir_length = strlen(source);
+	if (srcdir_length > SIZE_MAX - 2) {
+		free(source);
+		return -1;
+	}
 	
 	// make sure srcdir ends with a '/'
 	if (source[srcdir_length-1] == '/') {
-		sources[n_sources-1].path = strdup(source);
+		path = strdup(source);
 	} else {
-		sources[n_sources-1].path = (char*) malloc(srcdir_length + 2);
-		sprintf(sources[n_sources-1].path, "%s/", source);
+		path = malloc(srcdir_length + 2);
+		if (path)
+			snprintf(path, srcdir_length + 2, "%s/", source);
 	}
+	free(source);
+	if (!path)
+		return -1;
+
+	sources[n_sources].path = path;
+	n_sources++;
 	
 	return 0;
 }
@@ -253,7 +269,7 @@ void checkString(const char *s, size_t *length, char *empty) {
 	*length = 0;
 	*empty = 1;
 	while (*s != '\0') {
-		if (*empty && !isspace(*s))
+		if (*empty && !isspace((unsigned char)*s))
 			*empty = 0;
 		s++;
 		(*length)++;
@@ -274,6 +290,10 @@ static int parse_file(const char *filename, int exclude)
 	if (f) {
 		while (fgets(line, sizeof(line), f)) {
 			checkString(line, &len, &empty);
+			if (len == sizeof(line) - 1 && line[len - 1] != '\n' && !feof(f)) {
+				fclose(f);
+				return -ENAMETOOLONG;
+			}
 			
 			if (empty)
 				continue;
