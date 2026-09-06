@@ -328,12 +328,10 @@ static int parse_file(const char *filename, int exclude)
  */
 static int exclude_chroot_path(const char *path)
 {
-	struct stat st, symt;
 	struct rule *curr_rule;
 	size_t len;
 	unsigned int i;
 	
-	lstat(path, &st);
 	len = strlen(path);
 	
 	// always allow access to the srcdir itself (although it might appear empty)
@@ -434,7 +432,7 @@ static int exclude_path(char *realpath, size_t realpath_size, const char *fuse_p
  * Checks if str1 begins with str2. If so, returns a pointer to the end of
  * the match. Otherwise, returns null.
  */
-static const char *str_consume(const char *str1, char *str2)
+static const char *str_consume(const char *str1, const char *str2)
 {
 	if (strncmp(str1, str2, strlen(str2)) == 0) {
 		return str1 + strlen(str2);
@@ -528,8 +526,9 @@ static int ffs_readdir_helper(unsigned int source_idx, char *realpath, const cha
 		
 		// check if one of the previous sources already added an entity with this name
 		for (i=0; i < source_idx; i++) {
-			snprintf(subpath, PATH_MAX, "%s%s%s%s", sources[i].path, &path[1], path[1] == 0 ? "":"/", de->d_name);
-			fprintf(stderr, "rdir %s\n", subpath);
+			if (snprintf(subpath, PATH_MAX, "%s%s%s%s", sources[i].path,
+					&path[1], path[1] == 0 ? "":"/", de->d_name) >= PATH_MAX)
+				continue;
 			if (access(subpath, F_OK) != -1) {
 				exclude = exclude_chroot_path(subpath);
 				
@@ -540,11 +539,13 @@ static int ffs_readdir_helper(unsigned int source_idx, char *realpath, const cha
 				}
 			}
 		}
-		
-		if (skip)
-			continue;
-		
-		snprintf(subpath, PATH_MAX, "%s%s%s", realpath, path[1] == 0 ? "":"/", de->d_name);
+
+			if (skip)
+				continue;
+
+			if (snprintf(subpath, PATH_MAX, "%s%s%s", realpath,
+					path[1] == 0 ? "":"/", de->d_name) >= PATH_MAX)
+				continue;
 		
 		exclude = exclude_chroot_path(subpath);
 		
@@ -555,9 +556,8 @@ static int ffs_readdir_helper(unsigned int source_idx, char *realpath, const cha
 			continue;
 		
 		struct stat st;
-		memset(&st, 0, sizeof(st));
-		st.st_ino = de->d_ino;
-		st.st_mode = de->d_type << 12;
+		if (lstat(subpath, &st) == -1)
+			continue;
 		if (filler(buf, de->d_name, &st, 0))
 			break;
 	}
@@ -571,10 +571,10 @@ static int ffs_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
 				   off_t offset, struct fuse_file_info *fi)
 {
 	char realpath[PATH_MAX];
-	int i, r, exclude;
-	ffs_debug("readdir[1]: path %s (expanded %s), exclude: %s\n", path,
-			realpath, exclude ? "y" : "n");
-	
+	unsigned int i;
+	int r, exclude;
+	(void)offset;
+	(void)fi;
 	// If we have to list the root of the fuse directory, we add the root entries
 	// from all sources. Else, we just show the entries from the 
 	if (!strcmp(path, "/")) {
@@ -585,7 +585,8 @@ static int ffs_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
 		}
 	} else {
 		for (i=0; i < n_sources; i++) {
-			snprintf(realpath, PATH_MAX, "%s%s", sources[i].path, &path[1]);
+			if (build_path(realpath, PATH_MAX, sources[i].path, path) < 0)
+				continue;
 			
 			if (access(realpath, F_OK) != -1) {
 				exclude = exclude_chroot_path(realpath);
@@ -696,21 +697,34 @@ static int ffs_rmdir(const char *path)
 
 static int ffs_symlink(const char *from, const char *to)
 {
-	char xfrom[PATH_MAX];
 	char xto[PATH_MAX];
+	char target[PATH_MAX];
+	const char *symlink_target = from;
+	unsigned int i;
 	
-	int exclude_from = exclude_path(xfrom, PATH_MAX, from);
 	int exclude_to = exclude_path(xto, PATH_MAX, to);
 	
-	ffs_debug("symlink: from %s (expanded %s), exclude %s; to %s"
-			" (expanded %s), exclude %s\n", from, xfrom,
-			exclude_from ? "y" : "n", to, xto, exclude_to ? "y": "n");
+	ffs_debug("symlink: target %s; to %s (expanded %s), exclude %s\n",
+			from, to, xto, exclude_to ? "y": "n");
 	
-	if (exclude_from || exclude_to)
+	if (exclude_to)
 		return -ENOENT;
+
+	/* Absolute FUSE targets need the backing source prefix. */
+	if (from[0] == '/') {
+		for (i = 0; i < n_sources; i++) {
+			if (strncmp(xto, sources[i].path, strlen(sources[i].path)) == 0) {
+				if (snprintf(target, sizeof(target), "%s%s", sources[i].path,
+						&from[1]) >= (int)sizeof(target))
+					return -ENAMETOOLONG;
+				symlink_target = target;
+				break;
+			}
+		}
+	}
 	
 	int res;
-	res = symlink(from, xto);
+	res = symlink(symlink_target, xto);
 	if (res == -1)
 		return -errno;
 	
@@ -866,8 +880,9 @@ static int ffs_open(const char *path, struct fuse_file_info *fi)
 	res = open(realpath, fi->flags);
 	if (res == -1)
 		return -errno;
-	
-	close(res);
+
+	/* Encode fd + 1 so fd 0 is not confused with an unset handle. */
+	fi->fh = (uint64_t)res + 1;
 	return 0;
 }
 
