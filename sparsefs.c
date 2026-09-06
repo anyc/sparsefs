@@ -456,6 +456,8 @@ static int ffs_getattr(const char *path, struct stat *stbuf)
 	ffs_debug("getattr: path %s (expanded %s), exclude %s\n", path,
 			realpath, exclude ? "y" : "n");
 	
+	if (exclude < 0)
+		return exclude;
 	if (exclude)
 		return -ENOENT;
 	
@@ -498,8 +500,12 @@ static int ffs_readlink(const char *path, char *buf, size_t size)
 	ffs_debug("readlink: path %s (expanded %s), exclude %s\n", path,
 			realpath, exclude ? "y" : "n");
 	
+	if (exclude < 0)
+		return exclude;
 	if (exclude)
 		return -ENOENT;
+	if (size == 0)
+		return -EINVAL;
 	
 	int res;
 	res = readlink(realpath, buf, size - 1);
@@ -1141,6 +1147,7 @@ static int ffs_opt_proc(void *data, const char *arg, int key,
 				    struct fuse_args *outargs)
 {
 	const char *str;
+	(void)data;
 	
 	switch(key) {
 		case KEY_SOURCE:
@@ -1149,8 +1156,8 @@ static int ffs_opt_proc(void *data, const char *arg, int key,
 				&& !(str = str_consume(arg, "-s")))
 				return -1;
 			
-			if (strlen(str) > 0)
-				append_source(strdup(str));
+			if (strlen(str) > 0 && append_source(strdup(str)) < 0)
+				return -1;
 			
 			return 0;
 			
@@ -1160,12 +1167,8 @@ static int ffs_opt_proc(void *data, const char *arg, int key,
 				&& !(str = str_consume(arg, "-X")))
 				return -1;
 			
-			/*
-			 * Not actually a memory leak. We don't want this memory
-			 * deallocated until program exit.
-			 */
-			if (strlen(str) > 0)
-				append_rules(strdup(str), 1);
+			if (strlen(str) > 0 && append_rules(strdup(str), 1) < 0)
+				return -1;
 			
 			return 0;
 			
@@ -1173,7 +1176,8 @@ static int ffs_opt_proc(void *data, const char *arg, int key,
 			if (!(str = str_consume(arg, "--excludefile=")))
 				return -1;
 			
-			parse_file(str, 1);
+			if (parse_file(str, 1) < 0)
+				return -1;
 			
 			return 0;
 			
@@ -1184,8 +1188,8 @@ static int ffs_opt_proc(void *data, const char *arg, int key,
 				return -1;
 			
 			/* See comment for KEY_EXCLUDE above. */
-			if (strlen(str) > 0)
-				append_rules(strdup(str), 0);
+			if (strlen(str) > 0 && append_rules(strdup(str), 0) < 0)
+				return -1;
 			
 			return 0;
 			
@@ -1193,7 +1197,8 @@ static int ffs_opt_proc(void *data, const char *arg, int key,
 			if (!(str = str_consume(arg, "--includefile=")))
 				return -1;
 			
-			parse_file(str, 0);
+			if (parse_file(str, 0) < 0)
+				return -1;
 			
 			return 0;
 			
@@ -1265,14 +1270,16 @@ int main(int argc, char *argv[])
 	/* Log startup information */
 	ffs_info("default action: %s\n", default_exclude ? "exclude" : "include");
 	
+#ifdef ENABLE_OUTPUT
 	struct rule *curr_rule = chain.head;
-	i = 1;
+	unsigned int rule_index = 1;
 	while (curr_rule) {
-		ffs_info("filter %d: %s %s\n", i++,
+		ffs_info("filter %d: %s %s\n", rule_index++,
 				curr_rule->exclude ? "exclude" : "include",
 				curr_rule->pattern);
 		curr_rule = curr_rule->next;
 	}
+#endif
 	
 	umask(0);
 	int ret = fuse_main(args.argc, args.argv, &ffs_oper, NULL);
